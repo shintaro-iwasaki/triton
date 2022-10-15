@@ -698,6 +698,13 @@ def load(ptr: tl.tensor,
             mask = broadcast_impl_shape(mask, ptr.type.get_block_shapes(), builder)
         if other:
             other = broadcast_impl_shape(other, ptr.type.get_block_shapes(), builder)
+    elif mask and mask.type.is_block():
+        ptr = broadcast_impl_shape(ptr, mask.type.get_block_shapes(), builder)
+        if other:
+            other = broadcast_impl_shape(other, mask.type.get_block_shapes(), builder)
+    elif other and other.type.is_block():
+        ptr = broadcast_impl_shape(ptr, other.type.get_block_shapes(), builder)
+        mask = broadcast_impl_shape(other, other.type.get_block_shapes(), builder)
 
     if other:
         other = cast(other, ptr.type.scalar.element_ty, builder)
@@ -756,8 +763,16 @@ def store(ptr: tl.tensor,
         raise ValueError("Pointer argument of store instruction is " + ptr.type.__repr__())
     if ptr.type.is_block():
         val = broadcast_impl_shape(val, ptr.type.get_block_shapes(), builder)
-    if mask:
-        mask = broadcast_impl_shape(mask, ptr.type.get_block_shapes(), builder)
+        if mask:
+            mask = broadcast_impl_shape(mask, ptr.type.get_block_shapes(), builder)
+    elif val.type.is_block():
+        ptr = broadcast_impl_shape(ptr, val.type.get_block_shapes(), builder)
+        if mask:
+            mask = broadcast_impl_shape(mask, val.type.get_block_shapes(), builder)
+    elif mask and mask.type.is_block():
+        ptr = broadcast_impl_shape(ptr, mask.type.get_block_shapes(), builder)
+        val = broadcast_impl_shape(val, mask.type.get_block_shapes(), builder)
+
     ptr_ty = ptr.type.scalar
     elt_ty = ptr_ty.element_ty
     # treat bool* as tl.int8*
