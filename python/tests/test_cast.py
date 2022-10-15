@@ -4,7 +4,7 @@ import triton.language as tl
 
 # TODO: function with no arguments don't work
 @triton.jit
-def cast_check(X):
+def cast_check_binop(X):
     zero_0d = tl.zeros([], dtype=tl.float32)
     zero_1d = tl.zeros([2], dtype=tl.float32)
     zero_2d_21 = tl.zeros([2, 1], dtype=tl.float32)
@@ -48,10 +48,60 @@ def cast_check(X):
     return a0, a1, a2, a3, a4, a5, a6, b1, b2, b3, b4, b5, c1, c2, c3, c4, c5, d1, d2, d3, d4
 
 
-def test_cast_check():
-    kernel = triton.compiler._compile(cast_check,
+def test_cast_check_binop():
+    kernel = triton.compiler._compile(cast_check_binop,
                                       signature="*fp32",
                                       device=0,
                                       output="ttgir")
     assert (kernel)
+    # TODO: Check types of the results
+
+
+@triton.jit
+def cast_check_0dtensor(ptr, val):
+    val_sc = val
+    val_0d = tl.zeros([], dtype=tl.float32)
+    ptr_sc = ptr
+    ptr_0d = tl.broadcast_to(ptr, [])
+    mask_sc = val == 0
+    mask_0d = tl.broadcast_to(mask_sc, [])
+
+    # Load
+    # val_0d += tl.load(ptr_sc)
+    val_0d += tl.load(ptr_0d)
+    # val_0d += tl.load(ptr_sc, mask_sc)
+    val_0d += tl.load(ptr_sc, mask_0d)
+    val_0d += tl.load(ptr_0d, mask_sc)
+    val_0d += tl.load(ptr_0d, mask_0d)
+    # val_0d += tl.load(ptr_sc, mask_sc, val_sc)
+    val_0d += tl.load(ptr_sc, mask_0d, val_sc)
+    val_0d += tl.load(ptr_0d, mask_sc, val_sc)
+    val_0d += tl.load(ptr_0d, mask_0d, val_sc)
+    val_0d += tl.load(ptr_sc, mask_sc, val_0d)
+    val_0d += tl.load(ptr_sc, mask_0d, val_0d)
+    val_0d += tl.load(ptr_0d, mask_sc, val_0d)
+    val_0d += tl.load(ptr_0d, mask_0d, val_0d)
+
+    # Store
+    tl.store(ptr_sc + 0, val_sc)
+    tl.store(ptr_0d + 1, val_sc)
+    tl.store(ptr_sc + 2, val_0d)
+    tl.store(ptr_0d + 3, val_0d)
+    tl.store(ptr_sc + 4, val_sc, mask_sc)
+    tl.store(ptr_0d + 5, val_sc, mask_sc)
+    tl.store(ptr_sc + 6, val_sc, mask_0d)
+    tl.store(ptr_0d + 7, val_sc, mask_0d)
+    tl.store(ptr_sc + 8, val_0d, mask_sc)
+    tl.store(ptr_0d + 9, val_0d, mask_sc)
+    tl.store(ptr_sc + 10, val_0d, mask_0d)
+    tl.store(ptr_0d + 11, val_0d, mask_0d)
+
+
+def test_cast_check_0dtensor():
+    kernel = triton.compiler._compile(cast_check_0dtensor,
+                                      signature="*fp32,fp32",
+                                      device=0,
+                                      output="ttir")
+    assert (kernel)
+    # TODO: Use ttgir or lower
     # TODO: Check types of the results
