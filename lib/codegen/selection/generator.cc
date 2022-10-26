@@ -138,7 +138,12 @@ Value* geper::operator()(Value *ptr, Value* off, const std::string& name){
 #define phi(...)             builder_->CreatePHI(__VA_ARGS__)
 #define ret(...)             builder_->CreateRet(__VA_ARGS__)
 #define select(...)          builder_->CreateSelect(__VA_ARGS__)
-#define store(...)           builder_->CreateStore(__VA_ARGS__)
+static int g_store_counter = 0;
+#define store(...)           do {                                 \
+  if (0) g_store_counter++;                                              \
+  if (0) fprintf(stderr, "[%d] Store at line %d\n", g_store_counter, __LINE__); \
+  builder_->CreateStore(__VA_ARGS__);                             \
+} while(0)
 #define sub(...)             builder_->CreateSub(__VA_ARGS__)
 #define shl(...)             builder_->CreateShl(__VA_ARGS__)
 #define udiv(...)            builder_->CreateUDiv(__VA_ARGS__)
@@ -263,6 +268,7 @@ void generator::visit_value(ir::value* v) {
         else if(v == double_buffer->first)
           ptr = shared_pre_ptr_[layout];
       } // else do nothing
+      fprintf(stderr, "shmems_[%p] = (ptr: %p, offset: %p))\n", v, ptr, offset); fflush(0);
       // what visit_dot & vist_cts & ... see
       shmems_[v] = ptr;
       // now only latches have offset (PHINode), only used by finalize_share_layout()
@@ -852,6 +858,7 @@ void generator::visit_cast_inst(ir::cast_inst* x) {
   for(indices_t idx: idxs_.at(x)){
     Value *arg = vals_[x->get_operand(0)][idx];
     vals_[x][idx] = cast(cvt(x->get_op()), arg, ty);
+    fprintf(stderr, "%p (=vals_[%p](%p, %p)) = cast(%p (=vals_[%p](%p, %p)))\n", vals_[x][idx], x, idx[0], idx[1], arg, x->get_operand(0), idx[0], idx[1]);
   }
 }
 
@@ -1390,6 +1397,13 @@ void generator::visit_store_inst(ir::store_inst * x){
     asm_oss << "}";
     if (has_l2_evict_policy) asm_oss << ", $" << n_words + 2;
     asm_oss << ";";
+    static int counter = 0;
+    counter++;
+    if (getenv("SKIP_ASM_STORE") && counter == atoi(getenv("SKIP_ASM_STORE"))) {
+      fprintf(stderr, "[%d] asm_store = is skipped\n");
+    } else {
+      fprintf(stderr, "[%d] asm_store = %s\n", counter, asm_oss.str().c_str());
+    }
     // ----
     // create inline ASM signature
     // ---
@@ -2730,12 +2744,8 @@ void generator::visit_fmadot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::va
   auto ord_a = layouts_->get(A)->get_order();
   auto ord_b = layouts_->get(B)->get_order();
   analysis::scanline_layout* layout_c = layouts_->get(C)->to_scanline();
-  analysis::shared_layout* layout_a = (analysis::shared_layout*)layouts_->get(C->get_operand(0));
-  analysis::shared_layout* layout_b = (analysis::shared_layout*)layouts_->get(C->get_operand(1));
   bool is_a_row = ord_a[0] == 1;
   bool is_b_row = ord_b[0] == 1;
-  std::string a_trans = is_a_row ? "" : ".trans";
-  std::string b_trans = is_b_row ? ".trans" : "";
   int stride_a_m = is_a_row ? shape_a[1] : 1;
   int stride_a_k = is_a_row ? 1 : shape_a[0];
   int stride_b_n = is_b_row ? 1 : shape_b[0];
@@ -2744,38 +2754,21 @@ void generator::visit_fmadot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::va
   int stride_a1 = is_a_row ? stride_a_m : stride_a_k;
   int stride_b0 = is_b_row ? stride_b_n : stride_b_k;
   int stride_b1 = is_b_row ? stride_b_k : stride_b_n;
-  int lda = is_a_row ? stride_a_m : stride_a_k;
-  int ldb = is_b_row ? stride_b_k : stride_b_n;
-  int per_phase_a = swizzle_->get_per_phase(layout_a);
-  int max_phase_a = swizzle_->get_max_phase(layout_a);
-  int per_phase_b = swizzle_->get_per_phase(layout_b);
-  int max_phase_b = swizzle_->get_max_phase(layout_b);
-  int num_ptr_a   = 8;
-  int num_ptr_b   = 8;
-  int vec_a = 2;
-  int vec_b = 4;
+  int num_ptr_a = 8;
+  int num_ptr_b = 8;
   distributed_axis ax_m = axes_.at(a_axes_->get(C, 0));
   distributed_axis ax_n = axes_.at(a_axes_->get(C, 1));
-//  Value* thread = tgt_->get_local_id(mod_, *builder_, 0);
 
   Value* off_a0 = is_a_row ? i32(0) : mul(ax_m.thread_id, i32(ax_m.contiguous));
   Value* off_a1 = is_a_row ? mul(ax_m.thread_id, i32(ax_m.contiguous)): i32(0);
   std::vector<Value*> off_a(num_ptr_a);
   for(int i = 0; i < num_ptr_a; i++){
-//    Value* off_a0i = add(off_a0, i32(is_a_row ? vec_a : layout_c->mts(0)*vec_a));
-//    off_a0i = exact_udiv(off_a0i, i32(vec_a));
-//    off_a0i = xor_(off_a0i, phase_a);
-//    off_a0i = mul(off_a0i, i32(vec_a));
     off_a[i] = add(mul(off_a0, i32(stride_a0)), mul(off_a1, i32(stride_a1)));
   }
   Value* off_b0 = is_b_row ? mul(ax_n.thread_id, i32(ax_n.contiguous)): i32(0);
   Value* off_b1 = is_b_row ? i32(0) : mul(ax_n.thread_id, i32(ax_n.contiguous));
   std::vector<Value*> off_b(num_ptr_b);
   for(int i = 0; i < num_ptr_b; i++){
-//    Value* off_b0i = add(off_b0, i32(is_b_row ? layout_c->mts(1)*vec_b : vec_b));
-//    off_b0i = exact_udiv(off_b0i, i32(vec_b));
-//    off_b0i = xor_(off_b0i, phase_b);
-//    off_b0i = mul(off_b0i, i32(vec_b));
     off_b[i] = add(mul(off_b0, i32(stride_b0)), mul(off_b1, i32(stride_b1)));
   }
   std::vector<Value*> ptrs_a(num_ptr_a);
@@ -2819,6 +2812,164 @@ void generator::visit_fmadot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::va
 }
 
 /**
+ * \brief Fall-back implementation of dot.
+ */
+void generator::visit_generic_dot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::value* D, unsigned NK, Type *c_ty) {
+  auto type_a = A->get_type()->get_scalar_ty();
+  auto type_b = B->get_type()->get_scalar_ty();
+  auto type_c = C->get_type()->get_scalar_ty();
+  auto type_d = D->get_type()->get_scalar_ty();
+  // TODO: need a strict type check
+  auto shape_c = C->get_type()->get_block_shapes();
+  auto shape_a = A->get_type()->get_block_shapes();
+  auto shape_b = B->get_type()->get_block_shapes();
+  auto ord_a = layouts_->get(A)->get_order();
+  if(C->is_trans_a()){
+    std::swap(ord_a[0], ord_a[1]);
+    std::swap(shape_a[0], shape_a[1]);
+  }
+  auto ord_b = layouts_->get(B)->get_order();
+  if(C->is_trans_b()){
+    std::swap(ord_b[0], ord_b[1]);
+    std::swap(shape_b[0], shape_b[1]);
+  }
+  bool is_a_row = ord_a[0] == 1;
+  bool is_b_row = ord_b[0] == 1;
+  int stride_a_m = is_a_row ? shape_a[1] : 1;
+  int stride_a_k = is_a_row ? 1 : shape_a[0];
+  int stride_b_n = is_b_row ? 1 : shape_b[0];
+  int stride_b_k = is_b_row ? shape_b[1] : 1;
+  int stride_a0 = is_a_row ? stride_a_k : stride_a_m;
+  int stride_a1 = is_a_row ? stride_a_m : stride_a_k;
+  int stride_b0 = is_b_row ? stride_b_n : stride_b_k;
+  int stride_b1 = is_b_row ? stride_b_k : stride_b_n;
+  distributed_axis ax_m = axes_.at(a_axes_->get(C, 0));
+  distributed_axis ax_n = axes_.at(a_axes_->get(C, 1));
+
+  Value* off_a = mul(ax_m.thread_id, i32(ax_m.contiguous));
+  if (is_a_row) {
+    off_a = mul(off_a, i32(stride_a1));
+  } else {
+    off_a = mul(off_a, i32(stride_a0));
+  }
+
+  Value* off_b = mul(ax_n.thread_id, i32(ax_n.contiguous));
+  if (is_b_row) {
+    off_b = mul(off_b, i32(stride_b0));
+  } else {
+    off_b = mul(off_b, i32(stride_b1));
+  }
+
+  fprintf(stderr, "ptr_a uses shmems_[A] (=shmems_[%p] -> %p)\n", A, shmems_[A]);
+  Value *ptr_a = gep(shmems_[A], off_a);
+  fprintf(stderr, "ptr_b uses shmems_[B] (=shmems_[%p] -> %p)\n", B, shmems_[B]);
+  Value *ptr_b = gep(shmems_[B], off_b);
+
+  std::map<indices_t, Value*> ret = vals_[D];
+  std::map<std::pair<int, int>, Value*> has, hbs;
+  static int X = 0;
+  X++;
+  if (analysis::scanline_layout* layout_c = layouts_->get(C)->to_scanline()) {
+    auto ord = layout_c->get_order();
+    fprintf(stderr, "Generic is used = %d\n   cta(ord[0]) = %d, cta(ord[1]) = %d, nts(ord[1]) = %d, nts(ord[0]) = %d\n", X,
+            (int)layout_c->shape_per_cta(ord[1]), (int)layout_c->shape_per_cta(ord[0]),
+            (int)layout_c->nts(ord[1]), (int)layout_c->nts(ord[0]));
+    int print_cnt = 0;
+    if (X != 20000) {
+      for(unsigned k = 0; k < NK; k++){
+        int z = 0;
+        for(unsigned i = 0; i < shape_c[ord[1]]; i += layout_c->shape_per_cta(ord[1]))
+        for(unsigned j = 0; j < shape_c[ord[0]]; j += layout_c->shape_per_cta(ord[0]))
+        for(unsigned ii = 0; ii < layout_c->nts(ord[1]); ii++)
+        for(unsigned jj = 0; jj < layout_c->nts(ord[0]); jj++){
+          unsigned m = (ord[0] == 1) ? i : j;
+          unsigned n = (ord[0] == 1) ? j : i;
+          unsigned mm = (ord[0] == 1) ? ii : jj;
+          unsigned nn = (ord[0] == 1) ? jj : ii;
+          if(has.find({m + mm, k}) == has.end()){
+            Value* pa = gep(ptr_a, i32((m + mm)*stride_a_m + k*stride_a_k));
+            Value* va = load(pa);
+            if (print_cnt++ < 10) {
+              fprintf(stderr, "va(=%p) = Load(GEP(%p + %d))\n", va, ptr_a, (int)((m + mm)*stride_a_m + k*stride_a_k));
+              if (print_cnt == 10) {
+                fprintf(stderr, "...\n");
+              }
+            }
+            has[{m + mm, k}] = va;
+          }
+          if(hbs.find({n + nn, k}) == hbs.end()){
+            Value* pb = gep(ptr_b, i32((n + nn)*stride_b_n + k*stride_b_k));
+            Value* vb = load(pb);
+            if (print_cnt++ < 10) {
+              fprintf(stderr, "vb(=%p) = Load(GEP(%p + %d))\n", vb, ptr_b, (int)((m + mm)*stride_a_m + k*stride_a_k));
+              if (print_cnt == 10) {
+                fprintf(stderr, "...\n");
+              }
+            }
+            hbs[{n + nn, k}] = vb;
+          }
+          Value* hasxhbs;
+          if (type_a->is_fp16_ty() && type_c->is_fp32_ty()) {
+            Value *hasfp32 = cast(llvm::Instruction::FPExt, has[{m+mm, k}], cvt(type_c));
+            Value *hbsfp32 = cast(llvm::Instruction::FPExt, hbs[{n+nn, k}], cvt(type_c));
+            hasxhbs = fmul(hasfp32, hbsfp32);
+          } else {
+            hasxhbs = fmul(has[{m+mm,k}], hbs[{n+nn, k}]);
+          }
+          if (print_cnt++ < 10) {
+            fprintf(stderr, " ret(%p, %p) += va (=%p) * vb (=%p)\n", idxs_[C].at(z)[0], idxs_[C].at(z)[1], has[{m+mm, k}], hbs[{n+nn, k}]); fflush(0);
+              if (print_cnt == 10) {
+                fprintf(stderr, "...\n");
+              }
+          }
+          ret[idxs_[C].at(z)] = fadd(hasxhbs, ret[idxs_[C].at(z)]);
+          z++;
+        }
+      }
+    } else {
+#if 0
+      for(unsigned i = 0; i < shape_c[ord[1]]; i += layout_c->shape_per_cta(ord[1]))
+      for(unsigned j = 0; j < shape_c[ord[0]]; j += layout_c->shape_per_cta(ord[0]))
+      for(unsigned ii = 0; ii < layout_c->nts(ord[1]); ii++)
+      for(unsigned jj = 0; jj < layout_c->nts(ord[0]); jj++){
+        unsigned m = (ord[0] == 1) ? i : j;
+        unsigned n = (ord[0] == 1) ? j : i;
+        unsigned mm = (ord[0] == 1) ? ii : jj;
+        unsigned nn = (ord[0] == 1) ? jj : ii;
+        if(has.find({m + mm, n + nn}) == has.end()){
+          Value* pa = gep(ptr_a, i32((m + mm)*stride_a_m + (n+nn)*stride_a_k));
+          Value* va = load(pa);
+          has[{m + mm, k}] = va;
+        }
+        if(hbs.find({m + mm, n + nn}) == hbs.end()){
+          Value* pb = gep(ptr_b, i32((n + nn)*stride_b_n + (m+mm)*stride_b_k));
+          Value* vb = load(pb);
+          hbs[{n + nn, k}] = vb;
+        }
+        Value* hasxhbs;
+        if (type_a->is_fp16_ty() && type_c->is_fp32_ty()) {
+          Value *hasfp32 = cast(llvm::Instruction::FPExt, has[{m+mm, k}], cvt(type_c));
+          Value *hbsfp32 = cast(llvm::Instruction::FPExt, hbs[{n+nn, k}], cvt(type_c));
+          hasxhbs = fmul(hasfp32, hbsfp32);
+        } else {
+          hasxhbs = fmul(has[{m+mm,k}], hbs[{n+nn, k}]);
+        }
+        ret[idxs_[C].at(0)] = cast(llvm::Instruction::FPExt, has[{m+mm,n+nn}], cvt(type_c));
+      }
+#endif
+    }
+  } else {
+    // TODO: Handle all the cases because this function must be "generic"
+    throw std::runtime_error("layout_c must be scanline layout if visit_generic_dot() is used");
+  }
+
+  for(indices_t idx: idxs_.at(C)){
+    fprintf(stderr, "vals_[%p](%p, %p) = ret[%p](%p, %p)\n", C, idx[0], idx[1], idx[0], idx[1]); fflush(0);
+    vals_[C][idx] = ret[idx];
+  }
+}
+
+/**
  * \brief Code Generation for `dot`
  * Dispatches to appropriate specialized function
  */
@@ -2835,14 +2986,16 @@ void generator::visit_dot_inst(ir::dot_inst* dot) {
   unsigned NK = A_shapes[red_axis];
   bool is_outer = NK == 1;
   bool is_mma = layouts_->get(dot)->to_mma();
-  if(!is_outer && is_mma && tgt_->as_nvidia()->sm() < 80)
-    return visit_mma884(dot, A, B, D, NK);
+//#if 0
   if(!is_outer && is_mma && tgt_->as_nvidia()->sm() >= 80)
     return visit_mma16816(dot, A, B, D, NK); // rename it as visit_mma_v2()?
+  if(!is_outer && is_mma && tgt_->as_nvidia()->sm() >= 70)
+    return visit_mma884(dot, A, B, D, NK);
   if (dot->get_type()->get_scalar_ty()->is_fp32_ty() &&
       A->get_type()->get_scalar_ty()->is_fp32_ty())
     return visit_fmadot(dot, A, B, D, NK, c_ty, f_mul_add);
-  throw std::runtime_error("dot has invalid operand type");
+//#endif
+  return visit_generic_dot(dot, A, B, D, NK, c_ty);
 }
 
 void generator::visit_trans_inst(ir::trans_inst* trans) {
@@ -3367,6 +3520,10 @@ void generator::visit_masked_load_async_inst(ir::masked_load_async_inst* x){
 }
 
 void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
+  static int local_store_counter = 0;
+  local_store_counter++;
+  fprintf(stderr, "[%d] Creating copy-to-shared-inst\n", local_store_counter);
+
   unsigned in_vec = 1;
   ir::value *arg = cts->get_operand(0);
   analysis::shared_layout* out_layout = layouts_->get(cts)->to_shared();
@@ -3374,40 +3531,55 @@ void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
   auto out_order = out_layout->get_order();
   auto in_order = in_layout->get_order();
   // tiles
-  if(out_order == in_order)
+  fprintf(stderr, "  out_layout (%p), in_layout (%p)\n", out_layout, in_layout);
+  if(out_order == in_order) {
     in_vec = in_layout->contig_per_thread(in_order[0]);
+    fprintf(stderr, "  out_order (%p) == in_order (%p), in_order[0] = %d\n", out_order, in_order, (int)in_order[0]);
+  } else {
+    fprintf(stderr, "  out_order (%p) != in_order (%p)\n", out_order, in_order);
+  }
+  
   int out_vec = swizzle_->get_vec(out_layout);
   int min_vec = std::min<int>(out_vec, in_vec);
   int s = std::max<int>(out_vec / in_vec, 1);
+  fprintf(stderr, "  out_vec = %d, in_vec = %d, min_vec = %d, s = %d\n", (int)out_vec, (int)in_vec, (int)min_vec, (int)s);
   //
   int per_phase = swizzle_->get_per_phase(out_layout);
   int max_phase = swizzle_->get_max_phase(out_layout);
+  fprintf(stderr, "  per_phase = %d, max_phase = %d\n", per_phase, max_phase);
   //
   int mts_0 = in_layout->shape_per_cta(in_order[0]) / in_layout->contig_per_thread(in_order[0]);
   int mts_1 = in_layout->shape_per_cta(in_order[1]) / in_layout->contig_per_thread(in_order[1]);
+  fprintf(stderr, "  mts_0 = %d, mts_1 = %d\n", mts_0, mts_1);
   if(in_layout->to_mma()){
+    fprintf(stderr, "  in_layout->to_mma() == True\n");
     mts_0 = 4 * in_layout->to_mma()->wpt(in_order[0]);
     mts_1 = 8 * in_layout->to_mma()->wpt(in_order[1]);
     per_phase = 1;
     max_phase = 8;
+    fprintf(stderr, "  mts_0 = %d, mts_1 = %d\n", mts_0, mts_1);
+    fprintf(stderr, "  per_phase = %d, max_phase = %d\n", per_phase, max_phase);
   }
 
   int in_ld = in_layout->get_shape()[in_order[0]] / mts_0;
   int n_shared_0 = std::max<int>(in_vec    / out_vec, 1);
   int n_shared_1 = std::max<int>(per_phase*max_phase / mts_1, 1);
+  fprintf(stderr, "  in_ld = %d, n_shared_0 = %d, n_shared_1 = %d\n", in_ld, n_shared_0, n_shared_1);
   if(in_layout->to_mma()){
+    fprintf(stderr, "  in_layout->to_mma() == True\n");
     n_shared_0 = 8;
     n_shared_1 = 1;
+    fprintf(stderr, "  in_ld = %d, n_shared_0 = %d, n_shared_1 = %d\n", in_ld, n_shared_0, n_shared_1);
   }
 
   BasicBlock* CurrBB = builder_->GetInsertBlock();
   BasicBlock* FirstBB = &CurrBB->getParent()->getEntryBlock();
   auto shapes = cts->get_type()->get_block_shapes();
 
-
   // store to shared
   Value *current = nullptr;
   std::map<std::pair<int, int>, Value*> ptrs;
+  fprintf(stderr, "  loop-over i = 0 -> %d\n", (int)idxs_.at(arg).size());
   for(int i = 0; i < idxs_.at(arg).size(); i++){
     auto idx = idxs_[arg][i];
     Value *in_value = vals_[arg][idx];
@@ -3416,16 +3588,21 @@ void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
     current = insert_elt(current, in_value, i % min_vec);
     if(i % min_vec == min_vec - 1){
       unsigned id = i / min_vec;
+      fprintf(stderr, "    loop-in i = %d, id = %d\n", i, id);
       // input ptr info
       int id_0 = id % (in_ld/min_vec);
       int id_1 = id / (in_ld/min_vec);
       // std::cout << id_0 << " " << id_1 << " " << in_ld << " " << std::endl;
       std::pair<int, int> key = {id_1  % n_shared_1, id_0 % n_shared_0};
+      fprintf(stderr, "    key - %d, %d (id_0 = %d, n_shared_0 = %d, id_1 = %d, n_shared_1 = %d)\n", local_store_counter, id_1 % n_shared_1, id_0 % n_shared_0, id_0, n_shared_0, id_1, n_shared_1);
       if(ptrs.find(key) == ptrs.end()){
-        if(FirstBB->getTerminator())
+        if(FirstBB->getTerminator()) {
+            fprintf(stderr, "    Find key - getTerminator\n");
             builder_->SetInsertPoint(FirstBB->getTerminator());
-        else
+        } else {
+            fprintf(stderr, "    Find key - no getTerminator\n");
             builder_->SetInsertPoint(FirstBB);
+        }
         indices_t idx = idxs_.at(arg).at(key.first*in_ld);
         Value* phase = udiv(idx[in_order[1]], i32(per_phase));
         phase = urem(phase, i32(max_phase));
@@ -3441,6 +3618,7 @@ void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
       int off_0 = id_0 / n_shared_0 * n_shared_0 * mts_0;
       int off_1 = id_1 / n_shared_1 * n_shared_1 * mts_1;
       if(in_layout->to_mma()){
+        fprintf(stderr, "    to_mma succeeds.\n");
         off_0 = id_0/n_shared_0*n_shared_0*8;
         off_1 = id_1/n_shared_1*n_shared_1*8;
       }
@@ -3996,6 +4174,7 @@ void generator::init_idx(ir::value *v) {
 
 void generator::finalize_shared_layout(analysis::shared_layout *shared) {
   if (auto n_buffer = shared->get_N_buffer()) {
+    fprintf(stderr, "n_buffer is enabled\n"); fflush(0);
     // if (*_smem_idx == #stages-1) {
     //   *_smem_idx = 0;
     // } else *_smem_idx++;
@@ -4056,6 +4235,7 @@ void generator::finalize_shared_layout(analysis::shared_layout *shared) {
     Value *next_ptr = gep(shared_pre_ptr_[shared], lds_offset);
     static_cast<PHINode*>(shared_next_ptr_[shared])->addIncoming(next_ptr, loop);
   } else if(shared->get_double_buffer()) {
+    fprintf(stderr, "double_buffer is enabled\n"); fflush(0);
     auto info = *shared->get_double_buffer();
     ir::phi_node *phi = info.phi;
     PHINode *ptr = (PHINode*)shmems_[phi];

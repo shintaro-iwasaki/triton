@@ -24,6 +24,7 @@ inline unsigned clamp(unsigned x, unsigned a, unsigned b) {
 }
 
 inline bool is_hmma_c(ir::value *v, int sm){
+  return false;
   bool result = false;
   if(auto *x = dynamic_cast<ir::dot_inst*>(v)){
     ir::value *a = x->get_operand(0);
@@ -136,6 +137,9 @@ void layout_visitor::visit_layout(data_layout *layout) {
 /* -------------------------------- *
  *        Base Data Layout          *
  * -------------------------------- */
+void stop() {
+  printf("stop == 1\n");
+}
 
 data_layout::data_layout(id_t id,
                          const std::vector<int> &axes,
@@ -143,6 +147,15 @@ data_layout::data_layout(id_t id,
                          const std::vector<ir::value *> &values,
                          analysis::align* align): id_(id), axes_(axes), shape_(shape), values_(values) {
   // io pointer
+  static int data_layout_counter = 0;
+  data_layout_counter++;
+  if (data_layout_counter == 5) {
+    stop();
+  }
+  fprintf(stderr, "data_layout[%d] (%p) constructor (id = %d, shape[0] = %d, shape[1] = %d)\n", data_layout_counter, this, (int)id, (int)shape_[0], (int)shape_[1]);
+  for (int i = 0; i < values.size(); i++) {
+    fprintf(stderr, "  values[%d] = %s", i, values[i]->get_string().c_str());
+  } 
   std::set<ir::value*> ptr;
   for(ir::value* v: values_)
     extract_io_use(v, ptr);
@@ -164,7 +177,11 @@ data_layout::data_layout(id_t id,
     });
 //    std::cout << max_contiguous[0] << " " << max_contiguous[1] << std::endl;
 //    std::cout << order_[0] << " " << order_[1] << std::endl;
+   fprintf(stderr, "  max_contiguous = [%d, %d]\n", (int)max_contiguous[0], (int)max_contiguous[1]);
+  } else {
+   fprintf(stderr, "  max_contiguous is empty()\n", (int)max_contiguous.size());
   }
+  fprintf(stderr, "  -> order_ = [%d, %d]\n", (int)order_[0], (int)order_[1]);
 }
 
 int data_layout::find_axis(int to_find) const {
@@ -541,12 +558,18 @@ layouts::layouts(analysis::axes *axes, analysis::align *align, size_t num_warps,
 
 
 void layouts::connect(ir::value *x, ir::value *y) {
-  if(x == y)
+  if(x == y) {
+    fprintf(stderr, "    -> rejected: x == y\n");
     return;
-  if(!x->get_type()->is_block_ty())
+  }
+  if(!x->get_type()->is_block_ty()) {
+    fprintf(stderr, "    -> rejected: x is not block_ty\n");
     return;
-  if(!y->get_type()->is_block_ty())
+  }
+  if(!y->get_type()->is_block_ty()) {
+    fprintf(stderr, "    -> rejected: y is not block_ty\n");
     return;
+  }
   std::vector<int> x_axes = axes_->get(x);
   std::vector<int> y_axes = axes_->get(y);
   std::set<int> sx_axes(x_axes.begin(), x_axes.end());
@@ -557,15 +580,33 @@ void layouts::connect(ir::value *x, ir::value *y) {
                         std::inserter(common, common.begin()));
   graph_.add_edge(x, x);
   graph_.add_edge(y, y);
-  if(!common.empty())
+  fprintf(stderr, "    : intersection: x = [");
+  for (int i = 0; i < x_axes.size(); i++) {
+    fprintf(stderr, "%s%d", i != 0 ? ", " : "", x_axes[i]);
+  }
+  fprintf(stderr, "], y= [");
+  for (int i = 0; i < y_axes.size(); i++) {
+    fprintf(stderr, "%s%d", i != 0 ? ", " : "", y_axes[i]);
+  }
+  fprintf(stderr, "]\n");
+
+  if(!common.empty()) {
+    fprintf(stderr, "    -> added x->x, y->y, and x->y\n");
     graph_.add_edge(x, y);
+  } else {
+    fprintf(stderr, "    -> added x->x, y->y\n");
+  }
 }
 
 void layouts::make_graph(ir::instruction *i) {
   for(ir::value* opx: i->ops())
   for(ir::value* opy: i->ops()){
+    fprintf(stderr, "  i -> opx\n    i = %s    opx = %s", (dynamic_cast<ir::value *>(i))->get_string().c_str(), opx->get_string().c_str());
     connect(i, opx);
-    connect(opx, opy);
+    if (opx != opy) {
+      fprintf(stderr, "  opx -> opy\n    opx = %s    opy = %s", opx->get_string().c_str(), opy->get_string().c_str());
+      connect(opx, opy);
+    }
   }
 }
 
@@ -657,6 +698,7 @@ void layouts::run(ir::module &mod) {
   groups_.clear();
 
   ir::for_each_instruction(mod, [this](ir::instruction* i) {
+    fprintf(stderr, "Making graph for %s", i->get_string().c_str());
     make_graph(i);
   });
 

@@ -155,7 +155,6 @@ std::unique_ptr<llvm::Module> add_passes_to_emit_bin(
     // we need to link them in.
     link_extern_libs(extern_lib_map, isel.get_extern_lib_map(), ir, ctx, llvm);
   }
-
   return llvm;
 }
 

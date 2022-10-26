@@ -40,6 +40,9 @@ public:
   // visitor
   virtual void accept(visitor *v) = 0;
 
+  void print(std::ostream &os);
+  std::string get_string();
+
 private:
   std::string name_;
 

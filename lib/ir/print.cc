@@ -296,9 +296,8 @@ void AssemblyWriter::print_instruction(const instruction *instr) {
 }
 
 void AssemblyWriter::print_value(const value *v) {
-  // Not implemented
+  assert(false);
 }
-
 
 //-------------------------------
 // External interface
@@ -325,6 +324,25 @@ void instruction::print(std::ostream &os) {
   SlotTracker slot_tracker(this->get_parent()->get_parent());
   AssemblyWriter writer(os, slot_tracker);
   writer.print_instruction(this);
+}
+
+void value::print(std::ostream &os) {
+  if (auto *c = dynamic_cast<ir::constant *>(this)) {
+    os << "[" << "" << ": Constant]\n";
+  } else if (auto *i = dynamic_cast<ir::instruction *>(this)) {
+    os << "[" << "" << ": Instruction]";
+    SlotTracker slot_tracker(i->get_parent()->get_parent());
+    AssemblyWriter writer(os, slot_tracker);
+    writer.print_instruction(i);
+  } else {
+    os << "[" << "" << ": Other Value]\n";
+  }
+}
+
+std::string value::get_string() {
+  std::stringstream os;
+  print(os);
+  return os.str();
 }
 
 //-------------------------------

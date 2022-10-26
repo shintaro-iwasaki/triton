@@ -85,6 +85,14 @@ void axes::update_graph_dot(ir::instruction *i) {
   ir::value *A = dot->get_operand(0);
   ir::value *B = dot->get_operand(1);
   ir::value *D = dot->get_operand(2);
+  if (shapes.size() == 2) {
+    // add edges between result and A, B if it's 2D.
+    assert(shapes[0] == A->get_type()->get_block_shapes()[0]);
+    assert(A->get_type()->get_block_shapes()[1] == B->get_type()->get_block_shapes()[0]);
+    assert(shapes[1] == B->get_type()->get_block_shapes()[1]);
+    graph_.add_edge({dot, 0}, {A, 0});
+    graph_.add_edge({dot, 1}, {B, 1});
+  }
   // add edges between result and accumulator
   for(unsigned d = 0; d < shapes.size(); d++)
     graph_.add_edge({dot, d}, {D, d});
@@ -142,7 +150,8 @@ void axes::update_graph(ir::instruction *i) {
   return;
 }
 
-
+// axes::get returns axis of a certain dimension.  # of dimensions is the same as the tile rank.
+// 
 int axes::get(ir::value *value, unsigned dim) {
   return axes_.at({value, dim});
 }

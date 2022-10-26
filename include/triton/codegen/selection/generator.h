@@ -190,6 +190,7 @@ private:
   void visit_mma884(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
   void visit_mma16816(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
   void visit_fmadot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty, Function *f_mul_add);
+  void visit_generic_dot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty);
   void visit_dot_inst(ir::dot_inst*);
   void visit_trans_inst(ir::trans_inst*);
   void visit_sqrt_inst(ir::sqrt_inst*);
