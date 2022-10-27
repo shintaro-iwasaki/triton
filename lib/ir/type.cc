@@ -239,6 +239,8 @@ block_type* block_type::get_same_shapes(type *ty, type *ref){
 
 function_type::function_type(type *ret_ty, const std::vector<type*> &param_tys):
    type(ret_ty->get_context(), FunctionTyID) {
+  fprintf(stderr, "function_type::function_type(): param_tys.size() == %d\n", (int)param_tys.size());
+  // assert(0);
   contained_tys_.push_back(ret_ty);
   for(type *ty: param_tys)
     contained_tys_.push_back(ty);

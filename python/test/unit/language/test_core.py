@@ -1014,22 +1014,31 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
     z_tri = to_triton(np.empty_like(x), device=device, dst_type=dtype_str)
     z_tri_contiguous = to_triton(np.empty_like(x), device=device, dst_type=dtype_str)
     x_tri = to_triton(x, device=device, dst_type=dtype_str)
-    pgm = kernel[(1, 1)](x_tri, x_tri.stride(0), x_tri.stride(1),
-                         z_tri, z_tri.stride(1), z_tri.stride(0),
+    print(f"x_tri = {x_tri}")
+    print(f"x_tri.stride(0) = {x_tri.stride(0)}")
+    print(f"x_tri.stride(1) = {x_tri.stride(1)}")
+    print(f"z_tri = {z_tri}")
+    print(f"z_tri.stride(1) = {z_tri.stride(1)}")
+    print(f"z_tri.stride(0) = {z_tri.stride(0)}")
+    #pgm = kernel[(1, 1)](x_tri, x_tri.stride(0), x_tri.stride(1),
+    #                     z_tri, z_tri.stride(1), z_tri.stride(0),
+    #                     BLOCK_M=shape[0], BLOCK_N=shape[1])
+    pgm = kernel[(1, 1)](x_tri, x_tri.stride(0), 1,
+                         z_tri, 1, z_tri.stride(0),
                          BLOCK_M=shape[0], BLOCK_N=shape[1])
-    pgm_contiguous = kernel[(1, 1)](x_tri, x_tri.stride(1), x_tri.stride(0),
-                                    z_tri_contiguous, z_tri_contiguous.stride(0), z_tri_contiguous.stride(1),
-                                    BLOCK_M=shape[0], BLOCK_N=shape[1])
+    #pgm_contiguous = kernel[(1, 1)](x_tri, x_tri.stride(1), x_tri.stride(0),
+    #                                z_tri_contiguous, z_tri_contiguous.stride(0), z_tri_contiguous.stride(1),
+    #                                BLOCK_M=shape[0], BLOCK_N=shape[1])
     # numpy result
     z_ref = x.transpose(*perm)
     # compare
     triton.testing.assert_almost_equal(z_tri, z_ref)
-    triton.testing.assert_almost_equal(z_tri_contiguous, z_ref)
+    # triton.testing.assert_almost_equal(z_tri_contiguous, z_ref)
     # parse ptx to make sure ld/st are vectorized
     ptx = pgm.asm['ptx']
     assert 'ld.global.v4' in ptx
     assert 'st.global.v4' in ptx
-    ptx = pgm_contiguous.asm['ptx']
+    # ptx = pgm_contiguous.asm['ptx']
     assert 'ld.global.v4' in ptx
     assert 'st.global.v4' in ptx
 
@@ -1592,3 +1601,5 @@ def test_libdevice(dtype_str, expr, lib_path):
         np.testing.assert_equal(y_ref, to_numpy(y_tri))
     else:
         np.testing.assert_allclose(y_ref, to_numpy(y_tri), rtol=0.01)
+
+test_permute(dtype_str = 'float32', shape = (128, 128), perm = (1, 0), device = 'cuda')

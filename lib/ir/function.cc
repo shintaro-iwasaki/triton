@@ -14,6 +14,7 @@ argument::argument(type *ty, const std::string &name, function *parent, unsigned
 
 argument *argument::create(type *ty, const std::string &name,
                           function *parent, unsigned arg_no) {
+  // assert(0);
   return new argument(ty, name, parent, arg_no);
 }
 
@@ -35,6 +36,7 @@ function::function(function_type *ty, linkage_types_t linkage,
                    const std::string &name, module *parent)
     : global_object(ty, 0, linkage, name), parent_(parent), fn_ty_(ty), is_kernel_(false) {
   unsigned num_params = fn_ty_->get_num_params();
+  fprintf(stderr, "function::function(): fn_ty_->get_num_params() == %d\n", (int)num_params);
   if(parent)
     parent->push_function(this);
   // skip if no parameter

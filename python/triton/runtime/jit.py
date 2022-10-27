@@ -154,6 +154,7 @@ class JITFunction(KernelInterface):
             return False
         divisible_by_16 = [i for i, arg in enumerate(args) if is_divisible_by_16(arg) and i not in self.do_not_specialize]
         equal_to_1 = [i for i, arg in enumerate(args) if isinstance(arg, int) and arg == 1 and i not in self.do_not_specialize]
+        print(namedtuple("instance_descriptor", ["divisible_by_16", "equal_to_1"])(tuple(divisible_by_16), tuple(equal_to_1)))
         return namedtuple("instance_descriptor", ["divisible_by_16", "equal_to_1"])(tuple(divisible_by_16), tuple(equal_to_1))
         # return _triton.code_gen.instance_descriptor(divisible_by_16, equal_to_1)
 
@@ -229,6 +230,8 @@ class JITFunction(KernelInterface):
             specializations += [f'({arg}.data_ptr() % {JITFunction.divisibility} == 0) if hasattr({arg}, "data_ptr") '
                                 f'else ({arg} % {JITFunction.divisibility} == 0, {arg} == 1) if isinstance({arg}, int) '
                                 f'else (False,)']
+        print("_make_launcher")
+        print(f"  specializations = {specializations}")
         spec_keys = ', '.join(specializations)
         grid_args = ','.join([f'"{arg}": {arg}' for arg in self.arg_names])
 
@@ -254,10 +257,13 @@ def {self.fn.__name__}({', '.join(self.arg_names)}, grid, num_warps=4, num_stage
     try:
       bin = cache[device][key]
       if not warmup:
+          print("call warmup1 in kernel()")
           bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared, stream, bin.cu_function, triton.compiler.CompiledKernel.launch_enter_hook, triton.compiler.CompiledKernel.launch_exit_hook, bin, {args})
+      print("return1 in kernel()")
       return bin
     # kernel not cached -- compile
     except KeyError:
+      print("call compile1 in kernel()")
       # build dict of constant values
       args = [{args}]
       all_args = {', '.join([f'{arg}' for arg in self.arg_names])},
@@ -267,6 +273,7 @@ def {self.fn.__name__}({', '.join(self.arg_names)}, grid, num_warps=4, num_stage
       constants.update({{i: 1 for i in configs[0].equal_to_1}})
       # build kernel signature -- doesn't include specialized arguments
       signature = {{ i: self._type_of(_key_of(arg)) for i, arg in enumerate(all_args) if i not in self.constexprs }}
+      print("signature == ", signature)
       # build stub signature -- includes arguments that are specialized
       for i, arg in constants.items():
         if callable(arg):
@@ -274,14 +281,18 @@ def {self.fn.__name__}({', '.join(self.arg_names)}, grid, num_warps=4, num_stage
       if not self._call_hook(key, signature, device, constants, num_warps, num_stages, extern_libs, configs):
         bin = triton.compile(self, signature, device, constants, num_warps, num_stages, extern_libs=extern_libs, configs=configs)
         if not warmup:
+            print("call warmup2 in kernel()")
             bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared, stream, bin.cu_function, triton.compiler.CompiledKernel.launch_enter_hook, triton.compiler.CompiledKernel.launch_exit_hook, bin, *args)
         self.cache[device][key] = bin
+        print("return2 in kernel()")
         return bin
       return None
 """
         scope = {"version_key": version_key(), "get_cuda_stream": get_cuda_stream,
                  "self": self, "_spec_of": self._spec_of, "_key_of": self._key_of,
                  "cache": self.cache, "triton": triton, "torch": torch}
+        print(f"  src = {src}")
+        print(f"  scope = {scope}")
         exec(src, scope)
         return scope[self.fn.__name__]
 

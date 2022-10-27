@@ -141,6 +141,7 @@ size_t get_pointer_range_size(uint64_t addr){
 void parse_args(py::list& args, py::list do_not_specialize, const std::string& func_key, py::list& arg_names,
                 std::string& cache_key, std::string& params, size_t& params_size, py::dict constants,
                 int num_warps, int num_stages, py::dict& extern_libs) {
+    fprintf(stderr, "parse_args is called\n");
     size_t len = PyList_Size(args.ptr());
     params.reserve(8*len); // 8 max bytes by argument
     char* params_ptr = &params[0];
@@ -479,8 +480,14 @@ void init_triton_codegen(py::module &&m) {
           }
           asm_map_t asm_map;
           asm_map["ttir"] = py::cast(ttir.str());
+          fprintf(stderr, "#### ttir\n");
+          fprintf(stderr, "%s\n", ttir.str().c_str());
           asm_map["llir"] = py::cast(tmp);
+          // fprintf(stderr, "#### llir\n");
+          // fprintf(stderr, "%s\n", tmp.c_str());
           asm_map["ptx"] = py::cast(ptx);
+          // fprintf(stderr, "#### ptx\n");
+          // fprintf(stderr, "%s\n", ptx.c_str());
 
           if(!cubin.empty()){
             py::bytes bytes(cubin);

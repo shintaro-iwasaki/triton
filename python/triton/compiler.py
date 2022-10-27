@@ -970,6 +970,9 @@ def generate_launcher(identifier, constants, signature):
     src = f"""
 #include \"cuda.h\"
 #include <Python.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
 
 static inline void gpuAssert(CUresult code, const char *file, int line)
 {{
@@ -981,7 +984,9 @@ static inline void gpuAssert(CUresult code, const char *file, int line)
       char err[1024] = {{0}};
       strcat(err, prefix);
       strcat(err, str);
-      PyErr_SetString(PyExc_RuntimeError, err);
+      fprintf(stderr, "%s __FILE__ = %s, __LINE__ = %d, err = %s\\n", prefix, file, line, err);
+      assert(0);
+      // PyErr_SetString(PyExc_RuntimeError, err);
    }}
 }}
 #define CUDA_CHECK(ans) {{ gpuAssert((ans), __FILE__, __LINE__); }}
@@ -989,6 +994,7 @@ static inline void gpuAssert(CUresult code, const char *file, int line)
 
 void _launch(int gridX, int gridY, int gridZ, int num_warps, int shared_memory, CUstream stream, CUfunction function, {arg_decls}) {{
   void *params[] = {{ {', '.join(f"&arg{i}" for i in signature.keys() if i not in constants)} }};
+  fprintf(stderr, "_launch: {arg_decls}\\n");
   if(gridX*gridY*gridZ > 0){{
     CUDA_CHECK(cuLaunchKernel(function, gridX, gridY, gridZ, 32*num_warps, 1, 1, shared_memory, stream, params, 0));
   }}
@@ -1085,7 +1091,7 @@ PyMODINIT_FUNC PyInit_launcher(void) {{
   return m;
 }}
 """
-
+    print(src)
     return src
 
 
