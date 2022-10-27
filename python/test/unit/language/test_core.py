@@ -1233,6 +1233,10 @@ def test_masked_load(dtype_str, size, size_diff, device='cuda'):
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_masked_load_shared_memory(dtype, device='cuda'):
+    cc = _triton.runtime.cc(_triton.runtime.backend.CUDA, torch.cuda.current_device())
+    if cc < 70:
+        pytest.skip("Only test tl.dot() on devices with sm >= 70")
+
     check_type_supported(dtype)  # bfloat16 on cc < 80 will not be tested
 
     M = 32
