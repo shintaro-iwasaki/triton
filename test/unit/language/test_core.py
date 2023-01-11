@@ -1078,7 +1078,13 @@ def test_dot(epilogue, allow_tf32, dtype, device='cuda'):
         Ys = Y + off_k[:, None] * stride_yk + off_n[None, :] * stride_yn
         Ws = W + off_n[:, None] * stride_wn + off_l[None, :] * stride_wl
         Zs = Z + off_m[:, None] * stride_zm + off_n[None, :] * stride_zn
-        z = tl.dot(tl.load(Xs), tl.load(Ys), trans_a=TRANS_A, trans_b=TRANS_B, allow_tf32=ALLOW_TF32)
+        dot_a = tl.load(Xs)
+        if TRANS_A:
+            dot_a = tl.trans(dot_a)
+        dot_b = tl.load(Ys)
+        if TRANS_B:
+            dot_b = tl.trans(dot_b)
+        z = tl.dot(dot_a, dot_b, allow_tf32=ALLOW_TF32)
         if ADD_MATRIX:
             z += tl.load(Zs)
         if ADD_ROWS:
@@ -1096,7 +1102,10 @@ def test_dot(epilogue, allow_tf32, dtype, device='cuda'):
         if CHAIN_DOT:
             # tl.store(Zs, z)
             # tl.debug_barrier()
-            z = tl.dot(z.to(tl.float16), tl.load(Ws), trans_a=TRANS_A)
+            dot_a2 = z.to(tl.float16)
+            if TRANS_A:
+                dot_a2 = tl.trans(dot_a2)
+            z = tl.dot(dot_a2, tl.load(Ws))
         tl.store(Zs, z)
     # input
     rs = RandomState(17)
